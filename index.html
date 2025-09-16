@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GeoGuesser World</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        /* Custom styles for the application */
+        body {
+            font-family: 'Inter', sans-serif;
+            overflow: hidden; /* Prevent scrolling of the main page */
+        }
+        #street-view {
+            height: 100vh;
+            width: 100vw;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 0;
+        }
+        #main-menu-container #street-view {
+            filter: blur(8px) brightness(0.7);
+            transform: scale(1.1);
+        }
+        /* Custom transition for map and panels */
+        #map-container {
+            transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out;
+        }
+        #map-container.hidden {
+            opacity: 0;
+            transform: translateY(20px);
+            pointer-events: none;
+        }
+        /* Hide Google Maps UI elements we don't need */
+        .gm-style .gm-style-cc, .gm-style .gmnoprint, .gm-style-iw, .gm-svpc {
+            display: none !important;
+        }
+        .gm-style .gm-control-action {
+             display: none !important;
+        }
+        /* Spinner for loading states */
+        .spinner {
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #3498db;
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Draggable Action Bar style */
+        #action-bar {
+            cursor: move;
+            user-select: none; /* Prevent text selection while dragging */
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+
+    <!-- Main Menu Container -->
+    <div id="main-menu-container" class="relative w-screen h-screen flex flex-col items-center justify-center text-center p-8 z-30">
+        <!-- Background Street View for menu -->
+        <div id="menu-street-view" class="absolute inset-0 bg-cover bg-center" style="filter: blur(8px) brightness(0.6); transform: scale(1.1);"></div>
+        
+        <h1 class="text-6xl md:text-8xl font-bold tracking-tighter text-shadow mb-4">GeoGuesser World</h1>
+        <p class="text-lg md:text-xl text-gray-300 mb-12 max-w-2xl">Explore the world and test your geographic knowledge.</p>
+
+        <div class="flex flex-col gap-4 w-full max-w-xs">
+            <button id="start-game-button" class="bg-gray-500 text-white font-bold py-4 px-8 rounded-full shadow-lg transition-colors text-2xl cursor-not-allowed" disabled>
+                <span class="flex items-center justify-center"><div class="spinner mr-3"></div>Loading World...</span>
+            </button>
+            <div id="main-menu-auth-buttons" class="flex gap-4">
+                 <!-- Populated by JS -->
+            </div>
+             <button id="leaderboard-menu-button" class="w-full bg-yellow-600/80 hover:bg-yellow-600 text-white font-semibold py-3 px-6 rounded-lg transition-colors transform hover:scale-105 transition-transform">Leaderboard</button>
+             <button id="settings-menu-button" class="w-full bg-gray-600/80 hover:bg-gray-600 text-white font-semibold py-3 px-6 rounded-lg transition-colors transform hover:scale-105 transition-transform">Settings</button>
+        </div>
+    </div>
+
+    <!-- Main Game Container -->
+    <div id="game-container" class="relative w-screen h-screen hidden">
+        <!-- Street View Panorama -->
+        <div id="street-view"></div>
+
+        <!-- API Key Error Overlay -->
+        <div id="config-error-overlay" class="absolute top-0 left-0 right-0 z-50 p-4 text-center hidden">
+            <div class="bg-red-900/80 backdrop-blur-md border border-red-500 text-red-200 p-4 rounded-lg inline-block">
+                <h2 id="error-title" class="text-xl font-bold mb-2">Configuration Needed</h2>
+                <p id="error-message" class="text-sm mb-2">An API key is missing.</p>
+                <p id="error-instructions" class="text-xs max-w-2xl"></p>
+            </div>
+        </div>
+
+        <!-- Game UI Overlay -->
+        <div id="ui-overlay" class="absolute inset-0 flex flex-col pointer-events-none">
+            
+            <!-- Top Bar -->
+            <header class="flex justify-between items-center p-4 md:p-6 bg-gradient-to-b from-black/70 to-transparent">
+                <div class="flex items-center gap-4">
+                     <h1 class="text-2xl md:text-3xl font-bold tracking-tighter text-shadow">GeoGuesser World</h1>
+                     <div id="map-usage-counter" class="bg-black/50 backdrop-blur-md rounded-lg px-3 py-1 text-sm pointer-events-auto">
+                        <span>Free Map Loads Left: ~28,000</span>
+                    </div>
+                    <div id="round-timer" class="bg-black/50 backdrop-blur-md rounded-lg px-3 py-1 text-sm pointer-events-auto flex items-center gap-2 text-yellow-400">
+                        <i class="fa-solid fa-stopwatch"></i>
+                        <span id="timer-display">3:00</span>
+                    </div>
+                </div>
+                <div id="auth-container" class="flex items-center gap-2 md:gap-4 pointer-events-auto">
+                    <!-- This will be populated by JS based on auth state (simplified) -->
+                </div>
+            </header>
+
+            <!-- Main Content Area -->
+            <main class="flex-grow flex flex-col justify-end items-center relative">
+                
+                <!-- Round Info Panel (Bottom Left) -->
+                <div id="round-info-panel" class="absolute bottom-4 left-4 pointer-events-auto">
+                    <div id="round-info" class="bg-black/60 backdrop-blur-md rounded-xl p-4 shadow-lg text-center">
+                        <h2 class="text-lg font-semibold">Round <span id="round-number">1</span> of 5</h2>
+                        <p class="text-3xl font-bold my-2 text-yellow-400">Score: <span id="current-score">0</span></p>
+                        <p class="text-sm text-gray-300">Total Score: <span id="total-score">0</span></p>
+                    </div>
+                    <div id="ai-hint-box" class="bg-black/60 backdrop-blur-md rounded-xl p-3 shadow-lg text-sm text-cyan-200 hidden mt-2 max-w-xs"></div>
+                </div>
+
+                <!-- Vertical Action Bar (Right Center) -->
+                <div id="action-bar" class="absolute right-4 top-1/2 -translate-y-1/2 flex flex-col gap-3 p-3 bg-black/60 backdrop-blur-md rounded-full shadow-lg pointer-events-auto">
+                    <button id="ai-hint-button" title="Get AI Hint" class="w-12 h-12 flex items-center justify-center bg-cyan-600 hover:bg-cyan-500 rounded-full text-white text-xl transition-colors pointer-events-auto">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                    </button>
+                    <button id="map-toggle-button" title="Toggle Guess Map" class="w-12 h-12 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full text-white text-xl transition-colors pointer-events-auto">
+                        <i class="fa-solid fa-map-location-dot"></i>
+                    </button>
+                </div>
+
+                <!-- Guessing Map (Toggled) -->
+                <div id="map-container" class="absolute bottom-24 right-4 w-[300px] h-[200px] md:w-[400px] md:h-[250px] lg:w-[450px] lg:h-[300px] bg-black/60 backdrop-blur-md rounded-xl shadow-2xl border-2 border-white/20 overflow-hidden pointer-events-auto hidden">
+                    <div id="map" class="w-full h-full"></div>
+                </div>
+
+                 <!-- Guess/Next Round Button -->
+                <div id="action-button-container" class="w-full flex justify-center p-4 pointer-events-auto">
+                     <button id="guess-button" class="bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-10 rounded-full shadow-lg transform hover:scale-105 transition-transform text-xl">
+                        Guess
+                    </button>
+                    <button id="next-round-button" class="hidden bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-10 rounded-full shadow-lg transform hover:scale-105 transition-transform text-xl">
+                        Next Round
+                    </button>
+                    <button id="view-summary-button" class="hidden bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 px-10 rounded-full shadow-lg transform hover:scale-105 transition-transform text-xl">
+                        View Summary
+                    </button>
+                </div>
+            </main>
+        </div>
+        
+        <!-- Round Result Panel (Initially Hidden) -->
+        <div id="result-panel" class="absolute inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center hidden z-20 p-4">
+            <div class="text-center text-white max-w-lg w-full bg-gray-800/80 p-8 rounded-2xl shadow-2xl border border-white/10">
+                <h2 id="result-message" class="text-4xl font-bold mb-2">You were <span id="distance-km"></span>km away!</h2>
+                <p class="text-2xl text-green-400 font-semibold mb-6">You scored <span id="round-score"></span> points!</p>
+                <div id="result-map" class="w-full h-64 rounded-lg my-4 border-2 border-white/20"></div>
+                <!-- AI Fun Fact Section -->
+                <div id="ai-fun-fact-container" class="bg-gray-700/50 p-3 rounded-lg text-left my-4">
+                    <h3 class="font-bold text-purple-300 flex items-center gap-2 mb-1">✨ Fun Fact</h3>
+                    <p id="ai-fun-fact-text" class="text-sm text-gray-200">Generating a fun fact...</p>
+                </div>
+                <button id="continue-button" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-6 rounded-full shadow-lg transform hover:scale-105 transition-transform text-lg">
+                    Continue
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Modals -->
+    <div id="modal-backdrop" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 hidden"></div>
+
+    <!-- Auth Modal -->
+    <div id="auth-modal" class="fixed inset-0 flex items-center justify-center z-50 hidden p-4">
+        <div class="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm border border-white/10">
+            <div class="p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 id="auth-title" class="text-2xl font-bold">Login</h2>
+                    <button id="close-auth-modal" class="text-gray-400 hover:text-white">&times;</button>
+                </div>
+                <form id="auth-form">
+                    <input type="email" id="auth-email" placeholder="Email" class="w-full bg-gray-700 text-white p-3 rounded-lg mb-4 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                    <input type="password" id="auth-password" placeholder="Password" class="w-full bg-gray-700 text-white p-3 rounded-lg mb-4 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                    <p id="auth-error" class="text-red-400 text-sm mb-4 h-5"></p>
+                    <button type="submit" id="auth-submit-button" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg transition-colors">Login</button>
+                </form>
+                <p class="text-center text-sm text-gray-400 mt-4">
+                    <span id="auth-switch-text">Don't have an account?</span>
+                    <button type="button" id="auth-switch-button" class="text-blue-400 hover:underline">Sign Up</button>
+                </p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Leaderboard Modal -->
+    <div id="leaderboard-modal" class="fixed inset-0 flex items-center justify-center z-50 hidden p-4">
+        <div class="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md border border-white/10">
+            <div class="p-6">
+                 <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-bold">Global Leaderboard</h2>
+                    <button id="close-leaderboard-modal" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+                </div>
+                <div id="leaderboard-content" class="space-y-3 max-h-[60vh] overflow-y-auto pr-2">
+                    <!-- Leaderboard entries will be populated here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game History Modal -->
+    <div id="history-modal" class="fixed inset-0 flex items-center justify-center z-50 hidden p-4">
+        <div class="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl border border-white/10">
+            <div class="p-6">
+                 <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-bold">My Game History</h2>
+                    <button id="close-history-modal" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+                </div>
+                <div id="history-content" class="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
+                   <!-- Game history entries will be populated here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="fixed inset-0 flex items-center justify-center z-50 hidden p-4">
+        <div class="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg border border-white/10">
+            <div class="p-6">
+                 <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-bold">Settings</h2>
+                    <button id="close-settings-modal" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+                </div>
+                <div class="space-y-4">
+                    <div>
+                        <label for="gmaps-api-key-input" class="block text-sm font-medium text-gray-300 mb-1">Google Maps API Key</label>
+                        <input type="text" id="gmaps-api-key-input" class="w-full bg-gray-700 text-white p-2 rounded-lg border border-gray-600" placeholder="Enter your Google Maps API Key">
+                    </div>
+                     <div>
+                        <label for="gemini-api-key-input" class="block text-sm font-medium text-gray-300 mb-1">Gemini API Key (Optional)</label>
+                        <input type="text" id="gemini-api-key-input" class="w-full bg-gray-700 text-white p-2 rounded-lg border border-gray-600" placeholder="Enter your Gemini API Key for AI features">
+                    </div>
+                    <button id="save-settings-button" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 rounded-lg">Save and Reload</button>
+                    <p id="settings-saved-message" class="text-green-400 text-center text-sm hidden">Settings saved! Reloading...</p>
+                </div>
+                 <div class="mt-6 pt-6 border-t border-gray-700 text-sm text-gray-400">
+                    <h3 class="font-semibold text-lg text-white mb-2">About</h3>
+                    <p>This GeoGuesser clone was created with AI assistance. It features a custom backend, user authentication, a global leaderboard, and AI-powered hints and fun facts.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Game Summary Modal -->
+    <div id="summary-modal" class="fixed inset-0 flex items-center justify-center z-50 hidden p-4">
+         <div class="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md border border-white/10">
+            <div class="p-6 text-center">
+                 <div class="flex justify-end">
+                    <button id="close-summary-modal" class="text-gray-400 hover:text-white text-2xl mb-2">&times;</button>
+                </div>
+                <h2 class="text-3xl font-bold">Game Over!</h2>
+                <p class="text-lg mt-2 mb-4 text-gray-300">Your final score is:</p>
+                <p id="summary-final-score" class="text-6xl font-bold text-yellow-400 mb-6">0</p>
+                <button id="play-again-button" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-full shadow-lg transform hover:scale-105 transition-transform text-lg">
+                    Play Again
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- IMPORTANT CONFIGURATION ---
+        let GOOGLE_MAPS_API_KEY = localStorage.getItem('geoGuesserGmapsKey') || ""; // Load from local storage or set as empty
+        let GEMINI_API_KEY = localStorage.getItem('geoGuesserGeminiKey') || "";
+        const API_URL = 'http://localhost:5000/api';
+
+        // Wait for the DOM to be fully loaded before initializing everything
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- DOM ELEMENT DECLARATIONS ---
+            const mainMenuContainer = document.getElementById('main-menu-container');
+            const gameContainer = document.getElementById('game-container');
+            const startGameButton = document.getElementById('start-game-button');
+            const authContainer = document.getElementById('auth-container');
+            const mainMenuAuthButtons = document.getElementById('main-menu-auth-buttons');
+            const streetViewDiv = document.getElementById('street-view');
+            const menuStreetViewDiv = document.getElementById('menu-street-view');
+            const mapDiv = document.getElementById('map');
+            const guessButton = document.getElementById('guess-button');
+            const nextRoundButton = document.getElementById('next-round-button');
+            const viewSummaryButton = document.getElementById('view-summary-button');
+            const continueButton = document.getElementById('continue-button');
+            const roundNumberEl = document.getElementById('round-number');
+            const currentScoreEl = document.getElementById('current-score');
+            const totalScoreEl = document.getElementById('total-score');
+            const resultPanel = document.getElementById('result-panel');
+            const resultMessageEl = document.getElementById('result-message');
+            const roundScoreEl = document.getElementById('round-score');
+            const resultmapDiv = document.getElementById('result-map');
+            const authModal = document.getElementById('auth-modal');
+            const authForm = document.getElementById('auth-form');
+            const authTitle = document.getElementById('auth-title');
+            const authSubmitButton = document.getElementById('auth-submit-button');
+            const authSwitchButton = document.getElementById('auth-switch-button');
+            const authSwitchText = document.getElementById('auth-switch-text');
+            const closeAuthModal = document.getElementById('close-auth-modal');
+            const modalBackdrop = document.getElementById('modal-backdrop');
+            const summaryModal = document.getElementById('summary-modal');
+            const closeSummaryModal = document.getElementById('close-summary-modal');
+            const playAgainButton = document.getElementById('play-again-button');
+            const summaryFinalScore = document.getElementById('summary-final-score');
+            const leaderboardModal = document.getElementById('leaderboard-modal');
+            const closeLeaderboardModal = document.getElementById('close-leaderboard-modal');
+            const historyModal = document.getElementById('history-modal');
+            const closeHistoryModal = document.getElementById('close-history-modal');
+            const settingsModal = document.getElementById('settings-modal');
+            const closeSettingsModal = document.getElementById('close-settings-modal');
+            const saveSettingsButton = document.getElementById('save-settings-button');
+            const gmapsApiKeyInput = document.getElementById('gmaps-api-key-input');
+            const geminiApiKeyInput = document.getElementById('gemini-api-key-input');
+            const aiHintButton = document.getElementById('ai-hint-button');
+            const mapToggleButton = document.getElementById('map-toggle-button');
+            const actionBar = document.getElementById('action-bar');
+            const timerDisplay = document.getElementById('timer-display');
+            const configErrorOverlay = document.getElementById('config-error-overlay');
+            const distanceKmEl = document.getElementById('distance-km');
+
+            // --- GAME STATE & MAP OBJECTS ---
+            const ROUND_DURATION = 180; // 3 minutes
+            let timeLeft = ROUND_DURATION;
+            let roundTimer = null;
+            let isMapVisible = false;
+            let currentUser = null;
+            let userToken = null;
+            let isLoginMode = true;
+            let panorama, menuPanorama, map, resultmap;
+            let streetViewService = null;
+            let actualLocation = null;
+            let guessLocation = null;
+            let guessMarker = null;
+            let actualMarker, polyline;
+            let round = 1;
+            const maxRounds = 5;
+            let totalScore = 0;
+            let currentGameRounds = [];
+
+            // --- TIMER LOGIC ---
+            function startTimer() {
+                stopTimer(); // Clear any existing timer
+                timeLeft = ROUND_DURATION;
+                function updateTimer() {
+                    if (timeLeft < 0) { handleGuess(true); return; }
+                    const minutes = Math.floor(timeLeft / 60);
+                    let seconds = timeLeft % 60;
+                    seconds = seconds < 10 ? '0' + seconds : seconds;
+                    timerDisplay.textContent = `${minutes}:${seconds}`;
+                    timeLeft--;
+                }
+                updateTimer(); 
+                roundTimer = setInterval(updateTimer, 1000);
+            }
+            function stopTimer() { clearInterval(roundTimer); roundTimer = null; }
+
+            // --- GEMINI API LOGIC ---
+            async function callGeminiAPI(prompt, retries = 3, delay = 1000) {
+                 if (!GEMINI_API_KEY) return "Gemini API Key is not set in Settings.";
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${GEMINI_API_KEY}`;
+                const payload = { contents: [{ parts: [{ text: prompt }] }], };
+                for (let i = 0; i < retries; i++) {
+                    try {
+                        const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                        if (!response.ok) {
+                            const errorBody = await response.json();
+                            throw new Error(`API Error: ${response.status} ${response.statusText} - ${errorBody.error.message}`);
+                        }
+                        const result = await response.json();
+                        if (result.candidates?.[0]?.content.parts?.[0]) { return result.candidates[0].content.parts[0].text; } 
+                        else { throw new Error("No content in Gemini response."); }
+                    } catch (error) {
+                        console.error(`Gemini API call failed (attempt ${i + 1}):`, error);
+                        if (i === retries - 1) return "Sorry, the AI is unable to respond right now.";
+                        await new Promise(res => setTimeout(res, delay * Math.pow(2, i)));
+                    }
+                }
+            }
+            
+            async function getAIHint() {
+                if (!actualLocation) return;
+                const hintButton = document.getElementById('ai-hint-button');
+                const hintBox = document.getElementById('ai-hint-box');
+                hintButton.disabled = true;
+                hintButton.innerHTML = '<div class="spinner"></div>';
+                hintBox.classList.add('hidden');
+                const lat = actualLocation.lat();
+                const lng = actualLocation.lng();
+                const prompt = `You are a world-class GeoGuesser player providing a hint. Based on the location at latitude ${lat} and longitude ${lng}, give me a single, clever sentence as a hint. Do NOT mention the country, city, or any specific place names. Focus on subtle clues like architecture, language visible on signs, climate, geography, or unique environmental features.`;
+                const hint = await callGeminiAPI(prompt);
+                hintBox.textContent = hint;
+                hintBox.classList.remove('hidden');
+                hintButton.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i>';
+            }
+
+            async function getAIFunFact(latLng) {
+                const funFactText = document.getElementById('ai-fun-fact-text');
+                funFactText.innerHTML = '<div class="spinner inline-block mr-2"></div><span>Generating fun fact...</span>';
+                if (!latLng) {
+                    funFactText.textContent = "Could not generate a fun fact for this location.";
+                    return;
+                }
+                const lat = latLng.lat();
+                const lng = latLng.lng();
+                const prompt = `Provide a short, interesting, one-sentence fun fact about the location at latitude ${lat} and longitude ${lng}.`;
+                const fact = await callGeminiAPI(prompt);
+                funFactText.textContent = fact;
+            }
+
+            // --- SCRIPT EXECUTION START ---
+            function checkApiKeys() {
+                if (!GOOGLE_MAPS_API_KEY) {
+                    mainMenuContainer.classList.remove('hidden');
+                    gameContainer.classList.add('hidden');
+                    configErrorOverlay.classList.remove('hidden');
+                    
+                    configErrorOverlay.querySelector('#error-title').textContent = 'Welcome! API Key Needed';
+                    configErrorOverlay.querySelector('#error-message').textContent = 'Please add a Google Maps API key in the Settings menu to play.';
+                    configErrorOverlay.querySelector('#error-instructions').innerHTML = `Click the <code class="bg-gray-700 p-1 rounded text-sm">Settings</code> button on the main menu to enter your key.`;
+                    
+                    startGameButton.innerHTML = "Settings Required";
+                    startGameButton.classList.remove('bg-gray-500', 'cursor-not-allowed');
+                    startGameButton.classList.add('bg-red-600');
+                    startGameButton.disabled = false;
+                    
+                    return false;
+                }
+                configErrorOverlay.classList.add('hidden');
+                return true;
+            }
+            
+            // --- UI LOGIC ---
+            function handleStartGame() {
+                if (!checkApiKeys()) {
+                    settingsModal.classList.remove('hidden');
+                    modalBackdrop.classList.remove('hidden');
+                    return;
+                }
+                
+                if (startGameButton.disabled) return; 
+
+                mainMenuContainer.classList.add('hidden');
+                gameContainer.classList.remove('hidden');
+                resetGame();
+            }
+
+            function toggleMapVisibility() {
+                isMapVisible = !isMapVisible;
+                const mapContainer = document.getElementById('map-container');
+                mapContainer.classList.toggle('hidden');
+            }
+            
+            function handleGuess(timedOut = false) {
+                stopTimer();
+
+                if (timedOut && !guessLocation) {
+                    showResultPanel(0, 0, true);
+                    return;
+                }
+                
+                if (!guessLocation) {
+                    alert("Please select a location on the map first!");
+                    startTimer(); 
+                    return;
+                }
+
+                const distanceKm = google.maps.geometry.spherical.computeDistanceBetween(actualLocation, guessLocation) / 1000;
+                const score = Math.round(5000 * Math.exp(-distanceKm / 2000));
+                totalScore += score;
+                currentGameRounds.push({ round, actualLocation: { lat: actualLocation.lat(), lng: actualLocation.lng() }, guessLocation: { lat: guessLocation.lat(), lng: guessLocation.lng() }, distance: distanceKm, score });
+                updateScores(score, totalScore);
+                showResultPanel(distanceKm, score);
+                guessButton.classList.add('hidden');
+                if (round < maxRounds) { nextRoundButton.classList.remove('hidden'); } else { viewSummaryButton.classList.remove('hidden'); }
+                if (isMapVisible) {
+                    toggleMapVisibility();
+                }
+            }
+
+            function showResultPanel(distanceKm, score, wasTimedOutWithoutGuess = false) {
+                if (wasTimedOutWithoutGuess) {
+                    resultMessageEl.textContent = "Time's Up!";
+                    distanceKmEl.textContent = "N/A";
+                    roundScoreEl.textContent = "0";
+                } else {
+                    resultMessageEl.textContent = `You were ${Math.round(distanceKm).toLocaleString()}km away!`;
+                    distanceKmEl.textContent = Math.round(distanceKm).toLocaleString();
+                    roundScoreEl.textContent = score.toLocaleString();
+                }
+
+                resultPanel.classList.remove('hidden');
+                getAIFunFact(actualLocation);
+                if (!resultmap) initResultMap();
+                if (actualMarker) actualMarker.setMap(null);
+                if (guessMarker) guessMarker.setMap(null);
+                if (polyline) polyline.setMap(null);
+
+                actualMarker = new google.maps.Marker({ position: actualLocation, map: resultmap, icon: { url: 'http://maps.google.com/mapfiles/ms/icons/green-dot.png' } });
+                
+                if (!wasTimedOutWithoutGuess) {
+                    const guessResultMarker = new google.maps.Marker({ position: guessLocation, map: resultmap, icon: { url: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png' } });
+                    const bounds = new google.maps.LatLngBounds();
+                    bounds.extend(actualLocation);
+                    bounds.extend(guessLocation);
+                    resultmap.fitBounds(bounds);
+                    polyline = new google.maps.Polyline({ path: [actualLocation, guessLocation], geodesic: true, strokeColor: '#FF0000', strokeOpacity: 1.0, strokeWeight: 2, map: resultmap });
+                } else {
+                    resultmap.setCenter(actualLocation);
+                    resultmap.setZoom(3);
+                }
+            }
+            
+            function resetForNextRound() {
+                startTimer();
+                roundNumberEl.textContent = round;
+                updateScores(0, totalScore);
+                actualLocation = null;
+                guessLocation = null;
+                if (guessMarker) guessMarker.setMap(null);
+                guessMarker = null;
+                if (isMapVisible) {
+                    toggleMapVisibility();
+                }
+                nextRoundButton.classList.add('hidden');
+                guessButton.classList.remove('hidden');
+                const hintButton = document.getElementById('ai-hint-button');
+                hintButton.disabled = false;
+                hintButton.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i>';
+                document.getElementById('ai-hint-box').classList.add('hidden');
+                loadRandomLocation();
+            }
+            
+            // --- AUTHENTICATION & API LOGIC ---
+            function checkLoginState() {
+                const token = localStorage.getItem('geoGuesserToken');
+                const userData = localStorage.getItem('geoGuesserUser');
+                if (token && userData) {
+                    userToken = token;
+                    currentUser = JSON.parse(userData);
+                } else {
+                    currentUser = null;
+                    userToken = null;
+                }
+                 updateAuthUI(currentUser);
+            }
+
+            async function handleAuthSubmit(e) {
+                e.preventDefault();
+                const email = document.getElementById('auth-email').value;
+                const password = document.getElementById('auth-password').value;
+                const authErrorEl = document.getElementById('auth-error');
+                authErrorEl.textContent = '';
+                const endpoint = isLoginMode ? '/users/login' : '/users/register';
+                try {
+                    const response = await fetch(`${API_URL}${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }), });
+                    const data = await response.json();
+                    if (!response.ok) { throw new Error(data.message || 'Authentication failed'); }
+                    localStorage.setItem('geoGuesserToken', data.token);
+                    localStorage.setItem('geoGuesserUser', JSON.stringify(data));
+                    userToken = data.token;
+                    currentUser = data;
+                    updateAuthUI(currentUser);
+                    authModal.classList.add('hidden');
+                    modalBackdrop.classList.add('hidden');
+                } catch (error) { authErrorEl.textContent = error.message; }
+            }
+
+            function handleLogout() {
+                localStorage.removeItem('geoGuesserToken');
+                localStorage.removeItem('geoGuesserUser');
+                currentUser = null; userToken = null;
+                updateAuthUI(null);
+            }
+
+            function updateAuthUI(user) {
+                // In-Game UI
+                if (user) {
+                    authContainer.innerHTML = `<div class="text-right text-sm"><p class="truncate max-w-[150px]">${user.email}</p><p>Best: ${user.bestScore?.toLocaleString() || 0}</p></div><button id="history-button" class="bg-white/10 hover:bg-white/20 p-2 rounded-full transition-colors"><i class="fa-solid fa-clock-rotate-left"></i></button>`;
+                } else {
+                    authContainer.innerHTML = ''; // Keep it clean
+                }
+                
+                // Main Menu UI
+                if(user) {
+                    mainMenuAuthButtons.innerHTML = `<button id="history-menu-button" class="w-full bg-indigo-600/80 hover:bg-indigo-600 text-white font-semibold py-3 px-6 rounded-lg transition-colors transform hover:scale-105 transition-transform">Game History</button><button id="logout-menu-button" class="w-full bg-red-600/80 hover:bg-red-600 text-white font-semibold py-3 px-6 rounded-lg transition-colors transform hover:scale-105 transition-transform">Logout</button>`;
+                } else {
+                    mainMenuAuthButtons.innerHTML = `<button id="login-menu-button" class="w-full bg-blue-600/80 hover:bg-blue-600 text-white font-semibold py-3 px-6 rounded-lg transition-colors transform hover:scale-105 transition-transform">Login</button><button id="signup-menu-button" class="w-full bg-green-600/80 hover:bg-green-600 text-white font-semibold py-3 px-6 rounded-lg transition-colors transform hover:scale-105 transition-transform">Sign Up</button>`;
+                }
+            }
+
+            // --- GAME & DATA LOGIC ---
+            async function handleEndGame() {
+                if (currentUser && userToken) {
+                    try {
+                        const response = await fetch(`${API_URL}/games`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${userToken}` }, body: JSON.stringify({ totalScore, rounds: currentGameRounds }) });
+                        if (response.ok && totalScore > (currentUser.bestScore || 0)) {
+                            currentUser.bestScore = totalScore;
+                            localStorage.setItem('geoGuesserUser', JSON.stringify(currentUser));
+                            updateAuthUI(currentUser);
+                        }
+                    } catch (error) { console.error("Error saving game:", error); }
+                }
+                showSummary();
+            }
+
+            async function showLeaderboard() {
+                 const leaderboardContent = document.getElementById('leaderboard-content');
+                leaderboardContent.innerHTML = '<p>Loading...</p>';
+                try {
+                    const response = await fetch(`${API_URL}/games/leaderboard`);
+                    const topPlayers = await response.json();
+                    if (topPlayers.length === 0) { leaderboardContent.innerHTML = '<p>No scores yet. Be the first!</p>'; return; }
+                    leaderboardContent.innerHTML = topPlayers.map((player, index) => `<div class="flex justify-between items-center bg-gray-700/50 p-3 rounded-lg"><div class="flex items-center gap-4"><span class="font-bold text-lg w-6">${index + 1}</span><span>${player.email.split('@')[0]}</span></div><span class="font-bold text-yellow-400">${player.bestScore.toLocaleString()}</span></div>`).join('');
+                } catch (error) { leaderboardContent.innerHTML = '<p class="text-red-400">Could not load leaderboard.</p>'; }
+            }
+            async function showHistory() {
+                 const historyContent = document.getElementById('history-content');
+                if (!currentUser) { historyContent.innerHTML = '<p>Please log in to see your game history.</p>'; return; }
+                historyContent.innerHTML = '<p>Loading...</p>';
+                try {
+                    const response = await fetch(`${API_URL}/games/history`, { headers: { 'Authorization': `Bearer ${userToken}` } });
+                    const games = await response.json();
+                    if (games.length === 0) { historyContent.innerHTML = '<p>No games played yet.</p>'; return; }
+                    historyContent.innerHTML = games.map(game => { const date = new Date(game.createdAt).toLocaleDateString(); return `<div class="bg-gray-700/50 p-4 rounded-lg"><div class="flex justify-between items-center"><div><p class="font-bold text-lg">${date}</p><p class="text-yellow-400 text-xl font-semibold">${game.totalScore.toLocaleString()} points</p></div></div></div>`; }).join('');
+                } catch (error) { historyContent.innerHTML = '<p class="text-red-400">Could not load game history.</p>'; }
+            }
+
+            // --- MAPS & GAME INITIALIZATION ---
+            function loadGoogleMapsScript() {
+                if (window.google?.maps) return; 
+                if (!GOOGLE_MAPS_API_KEY) { 
+                    checkApiKeys();
+                    return; 
+                }
+                const script = document.createElement('script');
+                script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&loading=async&callback=initAllMaps&libraries=geometry`;
+                script.async = true;
+                document.head.appendChild(script);
+                window.initAllMaps = initAllMaps;
+            }
+
+            function initAllMaps() {
+                 streetViewService = new google.maps.StreetViewService();
+                 
+                 // Init Menu Panorama
+                 menuPanorama = new google.maps.StreetViewPanorama(menuStreetViewDiv, {
+                    addressControl: false, linksControl: false, panControl: false, enableCloseButton: false, 
+                    fullscreenControl: false, zoomControl: false, scrollwheel: false, clickToGo: false,
+                    motionTracking: false, motionTrackingControl: false
+                 });
+                 loadRandomLocation(true);
+                 
+                 // Init Game Panorama and Map
+                 panorama = new google.maps.StreetViewPanorama(streetViewDiv, { addressControl: false, linksControl: true, panControl: true, enableCloseButton: false, fullscreenControl: false, zoomControl: true, motionTracking: true, motionTrackingControl: true });
+                 initMap();
+                 
+                 // Enable the start button now that maps are ready
+                startGameButton.disabled = false;
+                startGameButton.innerHTML = 'Start Game';
+                startGameButton.classList.remove('bg-gray-500', 'cursor-not-allowed');
+                startGameButton.classList.add('bg-green-600', 'hover:bg-green-500', 'transform', 'hover:scale-105');
+            }
+            
+            function initMap() {
+                 map = new google.maps.Map(mapDiv, { center: { lat: 0, lng: 0 }, zoom: 1, streetViewControl: false, mapTypeControl: false, fullscreenControl: false, zoomControl: true, styles: [ { elementType: "geometry", stylers: [{ color: "#242f3e" }] }, { elementType: "labels.text.stroke", stylers: [{ color: "#242f3e" }] }, { elementType: "labels.text.fill", stylers: [{ color: "#746855" }] }, { featureType: "administrative.locality", elementType: "labels.text.fill", stylers: [{ color: "#d59563" }] }, { featureType: "poi", elementType: "labels.text.fill", stylers: [{ color: "#d59563" }] }, { featureType: "road", elementType: "geometry", stylers: [{ color: "#38414e" }] }, { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#212a37" }] }, { featureType: "road", elementType: "labels.text.fill", stylers: [{ color: "#9ca5b3" }] }, { featureType: "water", elementType: "geometry", stylers: [{ color: "#17263c" }] }, { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#515c6d" }] }, ], });
+                map.addListener('click', (e) => { placeGuessMarker(e.latLng); });
+            }
+            function initResultMap() {
+                resultmap = new google.maps.Map(resultmapDiv, { center: { lat: 0, lng: 0 }, zoom: 1, streetViewControl: false, mapTypeControl: false, fullscreenControl: false, zoomControl: true, styles: map.get('styles'), });
+            }
+
+            function loadRandomLocation(isForMenu = false) {
+                const randomLat = Math.random() * 170 - 85;
+                const randomLng = Math.random() * 360 - 180;
+                streetViewService.getPanorama({ location: { lat: randomLat, lng: randomLng }, radius: 100000, source: 'outdoor' }, (data, status) => {
+                    if (status === 'OK') { 
+                        if (isForMenu) {
+                           menuPanorama.setPano(data.location.pano);
+                           menuPanorama.setPov({ heading: Math.random() * 360, pitch: 0 });
+                        } else {
+                           actualLocation = data.location.latLng; 
+                           panorama.setPano(data.location.pano); 
+                           panorama.setPov({ heading: Math.random() * 360, pitch: 0 }); 
+                           panorama.setZoom(0);
+                           panorama.setVisible(true); 
+                        }
+                    } else { loadRandomLocation(isForMenu); }
+                });
+            }
+
+            function placeGuessMarker(location) {
+                if (guessMarker) { guessMarker.setMap(null); }
+                guessLocation = location;
+                guessMarker = new google.maps.Marker({ position: guessLocation, map: map, icon: { url: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png' } });
+            }
+            function updateScores(roundScore, newTotalScore) {
+                currentScoreEl.textContent = roundScore.toLocaleString();
+                totalScoreEl.textContent = newTotalScore.toLocaleString();
+            }
+            function handleContinue() { resultPanel.classList.add('hidden'); }
+            function handleNextRound() { round++; if (round <= maxRounds) { resetForNextRound(); } }
+            function showSummary() {
+                summaryFinalScore.textContent = totalScore.toLocaleString();
+                summaryModal.classList.remove('hidden');
+                modalBackdrop.classList.remove('hidden');
+            }
+            
+            function resetGame() {
+                stopTimer();
+                round = 1; totalScore = 0; currentGameRounds = [];
+                roundNumberEl.textContent = round;
+                updateScores(0, totalScore);
+                resetForNextRound();
+                viewSummaryButton.classList.add('hidden');
+                guessButton.classList.remove('hidden');
+                summaryModal.classList.add('hidden');
+                modalBackdrop.classList.add('hidden');
+            }
+            
+            // --- DRAGGABLE ACTION BAR LOGIC ---
+            function makeDraggable(element) {
+                 let isDragging = false;
+                let initialX, initialY, offsetX, offsetY;
+
+                element.addEventListener('mousedown', (e) => {
+                    if (e.target.closest('button')) return;
+                    isDragging = true;
+                    const rect = element.getBoundingClientRect();
+                    offsetX = e.clientX - rect.left;
+                    offsetY = e.clientY - rect.top;
+                    element.style.right = 'auto';
+                    element.style.transform = 'none';
+                    document.addEventListener('mousemove', onMouseMove);
+                    document.addEventListener('mouseup', onMouseUp);
+                });
+
+                function onMouseMove(e) {
+                    if (!isDragging) return;
+                    e.preventDefault();
+                    let newX = e.clientX - offsetX;
+                    let newY = e.clientY - offsetY;
+                    const container = document.getElementById('game-container');
+                    const elRect = element.getBoundingClientRect();
+                    const containerRect = container.getBoundingClientRect();
+                    newX = Math.max(containerRect.left, Math.min(newX, containerRect.right - elRect.width));
+                    newY = Math.max(containerRect.top, Math.min(newY, containerRect.bottom - elRect.height));
+                    element.style.left = `${newX}px`;
+                    element.style.top = `${newY}px`;
+                }
+
+                function onMouseUp() {
+                    isDragging = false;
+                    document.removeEventListener('mousemove', onMouseMove);
+                    document.removeEventListener('mouseup', onMouseUp);
+                }
+            }
+            
+            // --- MODAL & EVENT LISTENER SETUP ---
+            function setupModal(modal, openButtons, closeButton) {
+                document.body.addEventListener('click', (e) => { 
+                     const clickedButton = openButtons.find(id => e.target.closest(`#${id}`));
+                     if (clickedButton) {
+                         modal.classList.remove('hidden'); 
+                         modalBackdrop.classList.remove('hidden'); 
+                         if (clickedButton === 'login-menu-button') { isLoginMode = true; toggleAuthMode(true); }
+                         if (clickedButton === 'signup-menu-button') { isLoginMode = false; toggleAuthMode(true); }
+                     }
+                });
+                closeButton.addEventListener('click', () => { modal.classList.add('hidden'); modalBackdrop.classList.add('hidden'); });
+            }
+
+            setupModal(authModal, ['login-menu-button', 'signup-menu-button'], closeAuthModal);
+            setupModal(leaderboardModal, ['leaderboard-menu-button'], closeLeaderboardModal);
+            setupModal(historyModal, ['history-menu-button', 'history-button'], closeHistoryModal);
+            setupModal(settingsModal, ['settings-menu-button'], closeSettingsModal);
+
+            modalBackdrop.addEventListener('click', () => { [authModal, leaderboardModal, historyModal, summaryModal, settingsModal].forEach(m => m.classList.add('hidden')); modalBackdrop.classList.add('hidden'); });
+            closeSummaryModal.addEventListener('click', () => { summaryModal.classList.add('hidden'); modalBackdrop.classList.add('hidden'); });
+            
+            function toggleAuthMode(forceUpdate = false) {
+                if (!forceUpdate) isLoginMode = !isLoginMode;
+                authTitle.textContent = isLoginMode ? 'Login' : 'Sign Up';
+                authSubmitButton.textContent = isLoginMode ? 'Login' : 'Sign Up';
+                authSwitchText.textContent = isLoginMode ? "Don't have an account?" : 'Already have an account?';
+                authSwitchButton.textContent = isLoginMode ? 'Sign Up' : 'Login';
+                document.getElementById('auth-error').textContent = '';
+            }
+
+            function handleSaveSettings() {
+                localStorage.setItem('geoGuesserGmapsKey', gmapsApiKeyInput.value.trim());
+                localStorage.setItem('geoGuesserGeminiKey', geminiApiKeyInput.value.trim());
+                const savedMessage = document.getElementById('settings-saved-message');
+                savedMessage.classList.remove('hidden');
+                setTimeout(() => {
+                    location.reload();
+                }, 1000);
+            }
+
+            // --- EVENT LISTENERS ---
+            startGameButton.addEventListener('click', handleStartGame);
+            guessButton.addEventListener('click', () => handleGuess(false));
+            nextRoundButton.addEventListener('click', handleNextRound);
+            continueButton.addEventListener('click', handleContinue);
+            viewSummaryButton.addEventListener('click', handleEndGame);
+            playAgainButton.addEventListener('click', () => resetGame(false));
+            authSwitchButton.addEventListener('click', () => toggleAuthMode(false));
+            authForm.addEventListener('submit', handleAuthSubmit);
+            saveSettingsButton.addEventListener('click', handleSaveSettings);
+
+            document.body.addEventListener('click', e => {
+                if (e.target.closest('#leaderboard-menu-button')) showLeaderboard();
+                if (e.target.closest('#history-menu-button') || e.target.closest('#history-button')) showHistory();
+                if (e.target.closest('#logout-menu-button')) handleLogout();
+            });
+            aiHintButton.addEventListener('click', getAIHint);
+            mapToggleButton.addEventListener('click', toggleMapVisibility);
+            
+            makeDraggable(actionBar);
+
+            // --- INITIALIZATION ---
+            gmapsApiKeyInput.value = GOOGLE_MAPS_API_KEY;
+            geminiApiKeyInput.value = GEMINI_API_KEY;
+            checkLoginState();
+            loadGoogleMapsScript();
+        });
+    </script>
+</body>
+</html>
+
