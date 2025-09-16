@@ -1,0 +1,54 @@
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 30px;
+  background-color: #fff;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  z-index: 1000;
+  box-sizing: border-box;
+}
+
+.logo a {
+  font-size: 24px;
+  font-weight: bold;
+  color: #333;
+  text-decoration: none;
+}
+
+.app-header nav a {
+  margin: 0 15px;
+  text-decoration: none;
+  color: #555;
+  font-weight: 500;
+  transition: color 0.2s;
+}
+
+.app-header nav a:hover {
+  color: #007bff;
+}
+
+.auth-buttons .btn {
+  padding: 8px 16px;
+  border-radius: 5px;
+  text-decoration: none;
+  color: white;
+  transition: opacity 0.2s;
+}
+
+.auth-buttons .btn:hover {
+  opacity: 0.9;
+}
+
+.btn-login {
+  background-color: #007bff;
+  margin-right: 10px;
+}
+
+.btn-register {
+  background-color: #28a745;
+}
